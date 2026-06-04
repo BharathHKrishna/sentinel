@@ -76,3 +76,4 @@ wandb/
 
 # Fly.io
 .fly/
+sentinel_dev.db
