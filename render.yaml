@@ -1,0 +1,101 @@
+services:
+  # ── FastAPI backend ──────────────────────────────────────────────────────
+  - type: web
+    name: sentinel-api
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.api.txt
+    startCommand: python scripts/on_deploy.py && uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONPATH
+        value: .
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sentinel-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sentinel-redis
+          type: redis
+          property: connectionString
+      - key: PLANET_API_KEY
+        sync: false        # set manually in Render dashboard
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        sync: false        # set to your Vercel URL after deploy
+
+  # ── Celery worker ────────────────────────────────────────────────────────
+  - type: worker
+    name: sentinel-worker
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.worker.txt
+    startCommand: celery -A apps.worker.celery_app worker --loglevel=info --concurrency=2 --queues=default,scanning,alerts
+    envVars:
+      - key: PYTHONPATH
+        value: .
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sentinel-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sentinel-redis
+          type: redis
+          property: connectionString
+      - key: PLANET_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: C_FORCE_ROOT
+        value: "1"
+
+  # ── Celery beat scheduler ────────────────────────────────────────────────
+  - type: worker
+    name: sentinel-beat
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.worker.txt
+    startCommand: celery -A apps.worker.celery_app beat --loglevel=info
+    envVars:
+      - key: PYTHONPATH
+        value: .
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sentinel-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sentinel-redis
+          type: redis
+          property: connectionString
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  - type: redis
+    name: sentinel-redis
+    region: singapore
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: sentinel-db
+    region: singapore
+    plan: free
+    databaseName: sentinel
+    user: sentinel

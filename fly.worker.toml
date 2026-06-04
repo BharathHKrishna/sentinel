@@ -1,0 +1,26 @@
+app = "sentinel-worker"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile.worker"
+
+# Set secrets with: fly secrets set DATABASE_URL=... REDIS_URL=... PLANET_API_KEY=...
+# (same secrets as fly.api.toml)
+
+[env]
+  PYTHONUNBUFFERED = "1"
+  C_FORCE_ROOT = "1"
+
+# Worker runs as a private machine — no public HTTP ports
+[processes]
+  worker = "celery -A apps.worker.celery_app worker --loglevel=info --concurrency=4 --queues=default,scanning,alerts"
+  beat   = "celery -A apps.worker.celery_app beat   --loglevel=info"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory_mb = 1024
+
+[mounts]
+  source = "sentinel_models"
+  destination = "/app/models"

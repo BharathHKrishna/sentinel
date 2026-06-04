@@ -1,0 +1,20 @@
+{
+  "construction": {
+    "version": "rule-based-v1",
+    "path": null,
+    "type": "rule",
+    "trained_at": null,
+    "precision": null,
+    "recall": null,
+    "note": "Replace path with models/construction_v1.pt after training"
+  },
+  "solar": {
+    "version": "rule-based-v1",
+    "path": null,
+    "type": "rule",
+    "trained_at": null,
+    "precision": null,
+    "recall": null,
+    "note": "Replace path with models/solar_v1.pt after training"
+  }
+}

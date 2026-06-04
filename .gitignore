@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+*.so
+venv/
+.venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ML artifacts — track with DVC, not git
+models/*.pt
+models/*.pth
+models/*.onnx
+ml/data/
+!ml/data/.gitkeep
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+notebooks/*.png
+
+# Secrets
+.env
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Node / frontend
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Alembic (keep versions, ignore temp)
+apps/api/alembic/versions/__pycache__/
+
+# W&B
+wandb/
+
+# DVC
+.dvc/cache/
+.dvc/tmp/
+
+# Fly.io
+.fly/
