@@ -1,5 +1,9 @@
 """
 Celery application factory for the Sentinel worker.
+
+Redis is optional — if REDIS_URL is not set, Celery is configured with
+a dummy in-memory broker so the API starts cleanly. Tasks will fall back
+to synchronous execution via the admin route's _run_scan_sync().
 """
 import os
 from dotenv import load_dotenv
@@ -8,12 +12,17 @@ load_dotenv()
 
 from celery import Celery
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "")
+
+# Use memory:// broker if Redis is not configured so the API starts without crashing.
+# Task dispatch will fail gracefully and fall back to synchronous execution.
+_broker = REDIS_URL if REDIS_URL else "memory://"
+_backend = REDIS_URL if REDIS_URL else "cache+memory://"
 
 app = Celery(
     "sentinel",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
+    broker=_broker,
+    backend=_backend,
     include=["apps.worker.tasks"],
 )
 
@@ -28,6 +37,7 @@ app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=False,
     task_routes={
         "apps.worker.tasks.scan_region": {"queue": "scanning"},
         "apps.worker.tasks.classify_change": {"queue": "scanning"},
