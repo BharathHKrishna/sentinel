@@ -1,3 +1,4 @@
+import math
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,16 +11,13 @@ from apps.api.schemas import RegionCreate, RegionRead
 router = APIRouter()
 
 
-def _geom_to_wkt(geom: dict) -> str:
-    """Convert a GeoJSON Polygon geometry dict to WKT."""
-    if geom.get("type") != "Polygon":
-        raise ValueError("Only Polygon geometry is supported")
-    rings = geom["coordinates"]
-    ring_strs = []
-    for ring in rings:
-        pts = ", ".join(f"{lon} {lat}" for lon, lat in ring)
-        ring_strs.append(f"({pts})")
-    return f"POLYGON({', '.join(ring_strs)})"
+def _bbox_wkt(lat: float, lon: float, half_m: float = 512.0) -> str:
+    """Build a WKT polygon that is a 1024m × 1024m box centred on lat/lon."""
+    lat_delta = half_m / 111_320.0
+    lon_delta = half_m / (111_320.0 * math.cos(math.radians(lat)))
+    w, e = lon - lon_delta, lon + lon_delta
+    s, n = lat - lat_delta, lat + lat_delta
+    return f"POLYGON(({w} {s}, {e} {s}, {e} {n}, {w} {n}, {w} {s}))"
 
 
 def _region_to_read(region: Region) -> RegionRead:
@@ -62,11 +60,7 @@ def _region_to_read(region: Region) -> RegionRead:
 
 @router.post("/", response_model=RegionRead, status_code=status.HTTP_201_CREATED)
 def create_region(payload: RegionCreate, db: Session = Depends(get_db)) -> RegionRead:
-    try:
-        wkt = _geom_to_wkt(payload.geom)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
+    wkt = _bbox_wkt(payload.lat, payload.lon)
     region = Region(
         name=payload.name,
         geom=f"SRID=4326;{wkt}",
