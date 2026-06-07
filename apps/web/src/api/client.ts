@@ -71,11 +71,20 @@ export interface AlertSubscription {
   slack_webhook: string | null
 }
 
+export interface RegionCreatePayload {
+  name: string
+  lat: number
+  lon: number
+  detection_types: string[]
+  cadence: number
+  owner_email: string | null
+}
+
 // Regions
 export const regionsApi = {
   list: () => apiClient.get<Region[]>('/regions/').then((r) => r.data),
   get: (id: number) => apiClient.get<Region>(`/regions/${id}`).then((r) => r.data),
-  create: (payload: Omit<Region, 'id' | 'created_at'>) =>
+  create: (payload: RegionCreatePayload) =>
     apiClient.post<Region>('/regions/', payload).then((r) => r.data),
   delete: (id: number) => apiClient.delete(`/regions/${id}`),
 }
