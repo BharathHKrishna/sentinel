@@ -8,25 +8,10 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 class RegionCreate(BaseModel):
     name: str
-    lat: float   # center point latitude
-    lon: float   # center point longitude — backend expands to 1024m bbox
+    geom: Dict[str, Any]
     detection_types: List[str] = []
     cadence: int = 24  # hours
     owner_email: Optional[str] = None
-
-    @field_validator("lat")
-    @classmethod
-    def validate_lat(cls, v: float) -> float:
-        if not -90 <= v <= 90:
-            raise ValueError("lat must be between -90 and 90")
-        return v
-
-    @field_validator("lon")
-    @classmethod
-    def validate_lon(cls, v: float) -> float:
-        if not -180 <= v <= 180:
-            raise ValueError("lon must be between -180 and 180")
-        return v
 
     @field_validator("detection_types")
     @classmethod
