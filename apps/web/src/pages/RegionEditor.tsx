@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   MapContainer,
   TileLayer,
-  FeatureGroup,
-  Polygon,
+  Marker,
+  Rectangle,
   useMapEvents,
 } from 'react-leaflet'
-import { MapPin, Check, AlertTriangle, Trash2 } from 'lucide-react'
+import { MapPin, Check, AlertTriangle } from 'lucide-react'
 import { regionsApi } from '../api/client'
 
 const DETECTION_TYPES = [
@@ -26,18 +26,16 @@ const CADENCE_OPTIONS = [
   { value: 168, label: 'Weekly' },
 ]
 
-function MapClickHandler({
-  drawing,
-  onAddPoint,
-}: {
-  drawing: boolean
-  onAddPoint: (lat: number, lng: number) => void
-}) {
+// 1024 m box half-extents in degrees (approximate)
+const LAT_DELTA = 512 / 111_320
+function lonDelta(lat: number) {
+  return 512 / (111_320 * Math.cos((lat * Math.PI) / 180))
+}
+
+function MapClickHandler({ onPick }: { onPick: (lat: number, lon: number) => void }) {
   useMapEvents({
     click(e) {
-      if (drawing) {
-        onAddPoint(e.latlng.lat, e.latlng.lng)
-      }
+      onPick(e.latlng.lat, e.latlng.lng)
     },
   })
   return null
@@ -49,10 +47,11 @@ export default function RegionEditor() {
   const [detectionTypes, setDetectionTypes] = useState<string[]>(['construction'])
   const [cadence, setCadence] = useState(24)
   const [ownerEmail, setOwnerEmail] = useState('')
-  const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([])
+  const [center, setCenter] = useState<{ lat: number; lon: number } | null>(null)
+  const [latInput, setLatInput] = useState('')
+  const [lonInput, setLonInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [drawing, setDrawing] = useState(false)
 
   const toggleType = (type: string) => {
     setDetectionTypes((prev) =>
@@ -60,35 +59,47 @@ export default function RegionEditor() {
     )
   }
 
-  const handleAddPoint = (lat: number, lng: number) => {
-    setPolygonPoints((pts) => [...pts, [lat, lng]])
+  const applyPoint = (lat: number, lon: number) => {
+    setCenter({ lat, lon })
+    setLatInput(lat.toFixed(6))
+    setLonInput(lon.toFixed(6))
   }
+
+  const handleLatLonInput = () => {
+    const lat = parseFloat(latInput)
+    const lon = parseFloat(lonInput)
+    if (isNaN(lat) || isNaN(lon)) { setError('Enter valid lat/lon numbers.'); return }
+    if (lat < -90 || lat > 90) { setError('Latitude must be between -90 and 90.'); return }
+    if (lon < -180 || lon > 180) { setError('Longitude must be between -180 and 180.'); return }
+    setError(null)
+    applyPoint(lat, lon)
+  }
+
+  const bboxBounds = center
+    ? [
+        [center.lat - LAT_DELTA, center.lon - lonDelta(center.lat)],
+        [center.lat + LAT_DELTA, center.lon + lonDelta(center.lat)],
+      ] as [[number, number], [number, number]]
+    : null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-
     if (!name.trim()) { setError('Region name is required.'); return }
-    if (polygonPoints.length < 3) { setError('Draw a polygon with at least 3 points on the map.'); return }
+    if (!center) { setError('Click the map (or enter coordinates) to set a center point.'); return }
     if (detectionTypes.length === 0) { setError('Select at least one detection type.'); return }
-
-    const ring = [...polygonPoints, polygonPoints[0]]
-    const geom = {
-      type: 'Polygon' as const,
-      coordinates: [ring.map(([lat, lon]) => [lon, lat])],
-    }
 
     try {
       setSubmitting(true)
       const region = await regionsApi.create({
         name,
-        geom,
+        lat: center.lat,
+        lon: center.lon,
         detection_types: detectionTypes,
         cadence,
         owner_email: ownerEmail || null,
       })
 
-      // If email provided, auto-subscribe
       if (ownerEmail) {
         const { alertsApi } = await import('../api/client')
         await alertsApi.subscribe({ region_id: region.id, email: ownerEmail }).catch(() => null)
@@ -115,61 +126,33 @@ export default function RegionEditor() {
           className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col"
           style={{ height: '500px' }}
         >
-          <div className="p-2 border-b border-gray-100 flex items-center justify-between shrink-0">
-            <span className="text-xs text-gray-500">
-              {drawing
-                ? `Click to add vertices (${polygonPoints.length} so far). Click "Done" when finished.`
-                : 'Click "Draw Polygon" to start marking your region.'}
-            </span>
-            <div className="flex gap-2">
-              {!drawing ? (
-                <button
-                  type="button"
-                  onClick={() => { setDrawing(true); setPolygonPoints([]) }}
-                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors"
-                >
-                  Draw Polygon
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setDrawing(false)}
-                    className="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition-colors"
-                  >
-                    Done ({polygonPoints.length} pts)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPolygonPoints([])}
-                    className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 transition-colors"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </>
-              )}
-            </div>
+          <div className="p-2 border-b border-gray-100 shrink-0">
+            <p className="text-xs text-gray-500">
+              Click anywhere on the map to set the center point. A 1024 m × 1024 m area will be monitored around it.
+            </p>
           </div>
           <div className="flex-1">
             <MapContainer
               center={[20.5937, 78.9629]}
               zoom={5}
               style={{ height: '100%', width: '100%' }}
-              doubleClickZoom={false}
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              <MapClickHandler drawing={drawing} onAddPoint={handleAddPoint} />
-              <FeatureGroup>
-                {polygonPoints.length >= 2 && (
-                  <Polygon
-                    positions={polygonPoints}
-                    pathOptions={{ color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.2 }}
-                  />
-                )}
-              </FeatureGroup>
+              <MapClickHandler onPick={applyPoint} />
+              {center && (
+                <>
+                  <Marker position={[center.lat, center.lon]} />
+                  {bboxBounds && (
+                    <Rectangle
+                      bounds={bboxBounds}
+                      pathOptions={{ color: '#3182ce', fillColor: '#3182ce', fillOpacity: 0.15, weight: 2 }}
+                    />
+                  )}
+                </>
+              )}
             </MapContainer>
           </div>
         </div>
@@ -198,6 +181,41 @@ export default function RegionEditor() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             />
+          </div>
+
+          {/* Manual coordinate input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Center Coordinates <span className="text-gray-400">(or click the map)</span>
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={latInput}
+                onChange={(e) => setLatInput(e.target.value)}
+                placeholder="Latitude"
+                className="w-1/2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text"
+                value={lonInput}
+                onChange={(e) => setLonInput(e.target.value)}
+                placeholder="Longitude"
+                className="w-1/2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={handleLatLonInput}
+                className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg whitespace-nowrap"
+              >
+                Set
+              </button>
+            </div>
+            {center && (
+              <p className="text-xs text-green-600 mt-1">
+                Monitoring 1024 m × 1024 m around {center.lat.toFixed(5)}, {center.lon.toFixed(5)}
+              </p>
+            )}
           </div>
 
           <div>
@@ -248,22 +266,10 @@ export default function RegionEditor() {
             </p>
           </div>
 
-          <div className="pt-2 border-t border-gray-100 text-xs text-gray-400">
-            {polygonPoints.length < 3 ? (
-              <span className="text-amber-600">
-                Draw at least 3 points on the map to define your region.
-              </span>
-            ) : (
-              <span className="text-green-600">
-                Polygon ready: {polygonPoints.length} vertices.
-              </span>
-            )}
-          </div>
-
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 mt-auto"
           >
             {submitting ? (
               <>
