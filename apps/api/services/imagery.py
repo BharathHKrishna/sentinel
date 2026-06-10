@@ -1,8 +1,9 @@
 """
-Imagery fetchers for Sentinel Hub (S2/S1) and Planet Labs (PlanetScope/SkySat).
+Imagery fetchers for Sentinel-2 (free), Sentinel Hub, and Planet Labs.
 
-SentinelHubFetcher: OAuth2 client-credentials → Process API → numpy arrays.
-PlanetFetcher: API-key auth → Orders API v2 → numpy arrays via GDAL/rasterio.
+FreeS2Fetcher:   Element84 STAC + AWS public COGs — zero credentials.
+SentinelHubFetcher: OAuth2 → Sentinel Hub Process API.
+PlanetFetcher:   Planet Labs Orders API v2.
 """
 import io
 import os
@@ -15,6 +16,122 @@ import httpx
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# ── Free Sentinel-2 via Element84 STAC + AWS COGs ──────────────────────────────
+
+STAC_SEARCH = "https://earth-search.aws.element84.com/v1/search"
+
+# Element84 asset key → 12-band array index (S2 band order)
+_ASSET_TO_IDX = {
+    "coastal": 0,   # B01
+    "blue": 1,      # B02
+    "green": 2,     # B03
+    "red": 3,       # B04
+    "rededge1": 4,  # B05
+    "rededge2": 5,  # B06
+    "rededge3": 6,  # B07
+    "nir": 7,       # B08
+    "nir08": 8,     # B8A
+    "nir09": 9,     # B09
+    "swir16": 10,   # B11
+    "swir22": 11,   # B12
+}
+
+
+class FreeS2Fetcher:
+    """
+    Fetch real Sentinel-2 L2A imagery with zero credentials.
+    Uses Element84 Earth Search STAC API to find scenes, then reads
+    Cloud-Optimised GeoTIFFs directly from AWS Open Data via HTTP range requests.
+    """
+
+    def search(
+        self,
+        bbox: List[float],
+        start_date: str,
+        end_date: str,
+        max_cloud: int = 25,
+        limit: int = 5,
+    ) -> List[dict]:
+        payload = {
+            "collections": ["sentinel-2-l2a"],
+            "bbox": bbox,
+            "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
+            "limit": limit,
+            "query": {"eo:cloud_cover": {"lt": max_cloud}},
+            "sortby": [{"field": "properties.eo:cloud_cover", "direction": "asc"}],
+        }
+        resp = httpx.post(STAC_SEARCH, json=payload, timeout=30)
+        resp.raise_for_status()
+        return resp.json().get("features", [])
+
+    def _read_band(self, url: str, bbox: List[float], size: int = 256) -> np.ndarray:
+        """Read a single COG band clipped to bbox, resampled to (size, size)."""
+        import rasterio
+        from rasterio.warp import transform_bounds
+        from rasterio.windows import from_bounds
+        from rasterio.enums import Resampling
+
+        # Optimise remote COG reads
+        env = rasterio.Env(
+            GDAL_HTTP_MERGE_CONSECUTIVE_RANGES="YES",
+            GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
+            CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff",
+        )
+        with env:
+            with rasterio.open(url) as ds:
+                dst_bounds = transform_bounds(
+                    "EPSG:4326", ds.crs,
+                    bbox[0], bbox[1], bbox[2], bbox[3],
+                )
+                window = from_bounds(*dst_bounds, transform=ds.transform)
+                data = ds.read(
+                    1,
+                    window=window,
+                    out_shape=(size, size),
+                    resampling=Resampling.bilinear,
+                    boundless=True,
+                    fill_value=0,
+                )
+        return data.astype(np.float32) / 10000.0  # DN → reflectance [0,1]
+
+    def get_composite(
+        self,
+        bbox: List[float],
+        start_date: str,
+        end_date: str,
+        size: int = 256,
+    ) -> np.ndarray:
+        """
+        Return (size, size, 12) float32 array of S2 L2A bands [0,1].
+        Raises ValueError if no cloud-free scenes found.
+        """
+        items = self.search(bbox, start_date, end_date)
+        if not items:
+            raise ValueError(
+                f"No Sentinel-2 scenes for bbox={bbox} {start_date}→{end_date} "
+                f"with cloud cover <25%"
+            )
+
+        best = items[0]  # already sorted by cloud cover asc
+        assets = best["assets"]
+        cloud = best["properties"].get("eo:cloud_cover", "?")
+        logger.info(
+            "Free S2: using scene %s  cloud=%.1f%%  date=%s",
+            best["id"], cloud, best["properties"].get("datetime", "?")[:10],
+        )
+
+        result = np.zeros((size, size, 12), dtype=np.float32)
+        for asset_key, band_idx in _ASSET_TO_IDX.items():
+            if asset_key not in assets:
+                continue
+            url = assets[asset_key]["href"]
+            try:
+                result[:, :, band_idx] = self._read_band(url, bbox, size)
+            except Exception as exc:
+                logger.warning("Could not read band %s: %s", asset_key, exc)
+
+        return np.clip(result, 0.0, 1.0)
 
 SENTINEL_HUB_BASE = "https://services.sentinel-hub.com"
 OAUTH_TOKEN_URL = f"{SENTINEL_HUB_BASE}/auth/realms/main/protocol/openid-connect/token"
