@@ -63,7 +63,17 @@ def _run_scan_sync(region_id: int) -> Dict[str, Any]:
                 before_s2 = _ps_to_s2_compat(planet.get_planetscope_composite(bbox, before_start, before_end))
                 after_s2 = _ps_to_s2_compat(planet.get_planetscope_composite(bbox, after_start, after_end))
             except Exception as exc:
-                logger.warning("Planet fetch failed, using mock: %s", exc)
+                logger.warning("Planet fetch failed: %s", exc)
+
+        if before_s2 is None:
+            try:
+                from apps.api.services.imagery import FreeS2Fetcher
+                fetcher = FreeS2Fetcher()
+                before_s2 = fetcher.get_composite(bbox, before_start, before_end)
+                after_s2 = fetcher.get_composite(bbox, after_start, after_end)
+                logger.info("Using free Sentinel-2 imagery for region %d", region_id)
+            except Exception as exc:
+                logger.warning("Free S2 fetch failed: %s", exc)
 
         if before_s2 is None:
             mock = MockImageryProvider.for_region(det_types, seed=region_id)
