@@ -134,42 +134,8 @@ export default function Dashboard() {
         <StatCard label="Deforestation (7d)" value={typeCounts['deforestation'] ?? 0} icon={Trees} color="bg-green-500" />
       </div>
 
-      {/* Map + sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 overflow-hidden" style={{ height: '520px' }}>
-          {loading ? (
-            <div className="h-full flex items-center justify-center text-gray-400">Loading map...</div>
-          ) : (
-            <MapView regions={regions} events={allEvents} />
-          )}
-        </div>
-
-        <div className="flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '520px' }}>
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide sticky top-0 bg-gray-50 py-1">
-            Recent Changes
-          </h2>
-          {loading ? (
-            <p className="text-gray-400 text-sm">Loading...</p>
-          ) : recentEvents.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <Satellite className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No changes in the last 7 days</p>
-            </div>
-          ) : (
-            recentEvents.slice(0, 10).map((event) => (
-              <EventCard key={event.id} event={event} regionName={regionMap[event.region_id]?.name} />
-            ))
-          )}
-          {recentEvents.length > 10 && (
-            <Link to="/events" className="text-center text-sm text-blue-600 hover:underline py-2">
-              View all {recentEvents.length} events →
-            </Link>
-          )}
-        </div>
-      </div>
-
       {/* Region list with delete + scan + history */}
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-white rounded-lg border border-gray-200 mb-6">
         <div className="p-4 border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">My Regions</h2>
         </div>
@@ -233,6 +199,40 @@ export default function Dashboard() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Map + sidebar */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 overflow-hidden" style={{ height: '520px' }}>
+          {loading ? (
+            <div className="h-full flex items-center justify-center text-gray-400">Loading map...</div>
+          ) : (
+            <MapView regions={regions} events={allEvents} />
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '520px' }}>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide sticky top-0 bg-gray-50 py-1">
+            Recent Changes
+          </h2>
+          {loading ? (
+            <p className="text-gray-400 text-sm">Loading...</p>
+          ) : recentEvents.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Satellite className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No changes in the last 7 days</p>
+            </div>
+          ) : (
+            recentEvents.slice(0, 10).map((event) => (
+              <EventCard key={event.id} event={event} regionName={regionMap[event.region_id]?.name} />
+            ))
+          )}
+          {recentEvents.length > 10 && (
+            <Link to="/events" className="text-center text-sm text-blue-600 hover:underline py-2">
+              View all {recentEvents.length} events →
+            </Link>
+          )}
+        </div>
       </div>
     </div>
   )
