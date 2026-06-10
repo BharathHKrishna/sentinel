@@ -114,8 +114,8 @@ def scan_region(self, region_id: int) -> Dict[str, Any]:
         before_start = (now - timedelta(days=21)).strftime("%Y-%m-%d")
         before_end = (now - timedelta(days=14)).strftime("%Y-%m-%d")
 
-        # Fetch imagery — Planet (3 m, preferred) with Sentinel-2 (10 m) fallback
-        from apps.api.services.imagery import SentinelHubFetcher, PlanetFetcher
+        # Fetch imagery — Planet (3m) → Free S2 (10m, no credentials) → mock
+        from apps.api.services.imagery import SentinelHubFetcher, PlanetFetcher, FreeS2Fetcher
 
         before_s2 = after_s2 = None
         planet_key = os.environ.get("PLANET_API_KEY", "")
@@ -125,25 +125,31 @@ def scan_region(self, region_id: int) -> Dict[str, Any]:
                 planet = PlanetFetcher(api_key=planet_key)
                 before_ps = planet.get_planetscope_composite(bbox, before_start, before_end)
                 after_ps = planet.get_planetscope_composite(bbox, after_start, after_end)
-                # Convert PlanetScope (B,G,R,NIR) to S2-compatible 12-band layout
-                # by padding to match the generic detector's band expectations
                 before_s2 = _ps_to_s2_compat(before_ps)
                 after_s2 = _ps_to_s2_compat(after_ps)
                 logger.info("Using PlanetScope imagery for region %d", region_id)
             except Exception as exc:
-                logger.warning("Planet fetch failed for region %d, falling back to S2: %s", region_id, exc)
+                logger.warning("Planet fetch failed for region %d: %s", region_id, exc)
+
+        # Free Sentinel-2 via Element84 STAC + AWS COGs (no credentials needed)
+        if before_s2 is None:
+            try:
+                fetcher = FreeS2Fetcher()
+                before_s2 = fetcher.get_composite(bbox, before_start, before_end)
+                after_s2 = fetcher.get_composite(bbox, after_start, after_end)
+                logger.info("Using free Sentinel-2 imagery for region %d", region_id)
+            except Exception as exc:
+                logger.warning("Free S2 fetch failed for region %d: %s", region_id, exc)
 
         sh_client = os.environ.get("SENTINEL_HUB_CLIENT_ID", "")
-
         if before_s2 is None and sh_client and sh_client != "your-sentinel-hub-client-id":
             try:
                 fetcher = SentinelHubFetcher()
                 before_s2 = fetcher.get_sentinel2_composite(bbox, before_start, before_end)
                 after_s2 = fetcher.get_sentinel2_composite(bbox, after_start, after_end)
             except Exception as exc:
-                logger.warning("S2 imagery fetch failed for region %d: %s", region_id, exc)
+                logger.warning("Sentinel Hub fetch failed for region %d: %s", region_id, exc)
 
-        # Fall back to mock imagery for local dev / CI
         if before_s2 is None:
             from apps.api.services.mock_imagery import MockImageryProvider
             detection_types = region.detection_types or ["construction"]
@@ -153,7 +159,7 @@ def scan_region(self, region_id: int) -> Dict[str, Any]:
             mock = MockImageryProvider.for_region(detection_types, seed=region_id)
             before_s2 = mock.before_s2()
             after_s2 = mock.after_s2()
-            logger.info("Using mock imagery for region %d (no satellite credentials)", region_id)
+            logger.info("Using mock imagery for region %d (all satellite sources failed)", region_id)
 
         # SAR for flood detection (best-effort — Sentinel-1 only)
         before_sar = None
