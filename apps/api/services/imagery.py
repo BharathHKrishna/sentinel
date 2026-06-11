@@ -21,20 +21,12 @@ logger = logging.getLogger(__name__)
 
 STAC_SEARCH = "https://earth-search.aws.element84.com/v1/search"
 
-# Element84 asset key → 12-band array index (S2 band order)
+# Only the 4 bands the change detectors actually use — keeps fetches fast
 _ASSET_TO_IDX = {
-    "coastal": 0,   # B01
-    "blue": 1,      # B02
-    "green": 2,     # B03
-    "red": 3,       # B04
-    "rededge1": 4,  # B05
-    "rededge2": 5,  # B06
-    "rededge3": 6,  # B07
-    "nir": 7,       # B08
-    "nir08": 8,     # B8A
-    "nir09": 9,     # B09
-    "swir16": 10,   # B11
-    "swir22": 11,   # B12
+    "red": 3,       # B04 — NDVI, NDBI
+    "nir": 7,       # B08 — NDVI, solar
+    "swir16": 10,   # B11 — NBR fire, NDBI construction
+    "swir22": 11,   # B12 — solar farm signature
 }
 
 
@@ -65,7 +57,7 @@ class FreeS2Fetcher:
         resp.raise_for_status()
         return resp.json().get("features", [])
 
-    def _read_band(self, url: str, bbox: List[float], size: int = 256) -> np.ndarray:
+    def _read_band(self, url: str, bbox: List[float], size: int = 128) -> np.ndarray:
         """Read a single COG band clipped to bbox, resampled to (size, size)."""
         import rasterio
         from rasterio.warp import transform_bounds
@@ -100,7 +92,7 @@ class FreeS2Fetcher:
         bbox: List[float],
         start_date: str,
         end_date: str,
-        size: int = 256,
+        size: int = 128,
     ) -> np.ndarray:
         """
         Return (size, size, 12) float32 array of S2 L2A bands [0,1].
