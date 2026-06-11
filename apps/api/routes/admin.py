@@ -145,14 +145,22 @@ def trigger_scan(region_id: int, db: Session = Depends(get_db)) -> Dict[str, Any
     if not region:
         raise HTTPException(status_code=404, detail="Region not found")
 
-    from apps.worker.tasks import scan_region
-    result = _try_celery(scan_region, region_id)
-    if result:
-        result["region_id"] = region_id
-        return result
+    try:
+        from apps.worker.tasks import scan_region
+        result = _try_celery(scan_region, region_id)
+        if result:
+            result["region_id"] = region_id
+            return result
+    except Exception as exc:
+        logger.warning("Celery dispatch failed: %s", exc)
 
     logger.info("Redis unavailable — running scan synchronously for region %d", region_id)
-    return _run_scan_sync(region_id)
+    try:
+        return _run_scan_sync(region_id)
+    except Exception as exc:
+        import traceback
+        logger.error("Sync scan failed for region %d: %s", region_id, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/scan-all", response_model=Dict[str, Any])
