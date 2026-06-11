@@ -51,5 +51,31 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
-    """Liveness probe."""
     return {"status": "ok", "service": "sentinel-api"}
+
+
+@app.get("/debug/scan-test", tags=["meta"])
+async def scan_test() -> dict:
+    """Test scan imports and return any errors."""
+    results = {}
+    try:
+        from apps.api.services.imagery import FreeS2Fetcher
+        results["imagery_import"] = "ok"
+    except Exception as e:
+        results["imagery_import"] = str(e)
+    try:
+        from apps.worker.tasks import _region_bbox, _tile_url, _ps_to_s2_compat
+        results["tasks_import"] = "ok"
+    except Exception as e:
+        results["tasks_import"] = str(e)
+    try:
+        from apps.api.services.classifier import EventClassifier
+        results["classifier_import"] = "ok"
+    except Exception as e:
+        results["classifier_import"] = str(e)
+    try:
+        from apps.api.services.explainer import EventExplainer
+        results["explainer_import"] = "ok"
+    except Exception as e:
+        results["explainer_import"] = str(e)
+    return results
