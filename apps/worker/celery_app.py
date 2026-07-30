@@ -38,6 +38,14 @@ app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=False,
+    # If REDIS_URL points at a broker the API host can't actually reach
+    # (e.g. a Redis instance in a different Render project's private
+    # network), apply_async should fail fast so admin.py's fallback to a
+    # background task kicks in immediately instead of the caller hanging
+    # for ~20s across retried connection attempts.
+    broker_connection_timeout=2,
+    broker_transport_options={"socket_connect_timeout": 2, "socket_timeout": 2},
+    task_publish_retry=False,
     task_routes={
         "apps.worker.tasks.scan_region": {"queue": "scanning"},
         "apps.worker.tasks.classify_change": {"queue": "scanning"},
