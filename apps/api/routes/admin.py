@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from apps.api.database import get_db
@@ -138,9 +138,23 @@ def _try_celery(task_fn, *args, queue: str = "scanning") -> Dict[str, Any]:
         return None
 
 
+def _run_scan_background(region_id: int) -> None:
+    """Run the scan pipeline in a background thread (no Celery required)."""
+    try:
+        result = _run_scan_sync(region_id)
+        logger.info("Background scan complete for region %d: %s", region_id, result)
+    except Exception:
+        import traceback
+        logger.error("Background scan failed for region %d: %s", region_id, traceback.format_exc())
+
+
 @router.post("/scan/{region_id}", response_model=Dict[str, Any])
-def trigger_scan(region_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Manually trigger a scan for a specific region (Celery if available, else sync)."""
+def trigger_scan(
+    region_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Manually trigger a scan for a specific region (Celery if available, else background task)."""
     region = db.query(Region).filter(Region.id == region_id).first()
     if not region:
         raise HTTPException(status_code=404, detail="Region not found")
@@ -154,17 +168,16 @@ def trigger_scan(region_id: int, db: Session = Depends(get_db)) -> Dict[str, Any
     except Exception as exc:
         logger.warning("Celery dispatch failed: %s", exc)
 
-    logger.info("Redis unavailable — running scan synchronously for region %d", region_id)
-    try:
-        return _run_scan_sync(region_id)
-    except Exception as exc:
-        import traceback
-        logger.error("Sync scan failed for region %d: %s", region_id, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(exc))
+    logger.info("Redis unavailable — running scan in background for region %d", region_id)
+    background_tasks.add_task(_run_scan_background, region_id)
+    return {"region_id": region_id, "queued": True, "mode": "background"}
 
 
 @router.post("/scan-all", response_model=Dict[str, Any])
-def trigger_scan_all(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def trigger_scan_all(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
     """Trigger a scan cycle for all regions."""
     regions = db.query(Region).all()
     if not regions:
@@ -177,8 +190,8 @@ def trigger_scan_all(db: Session = Depends(get_db)) -> Dict[str, Any]:
         if celery_result:
             results.append({"region_id": region.id, **celery_result})
         else:
-            res = _run_scan_sync(region.id)
-            results.append(res)
+            background_tasks.add_task(_run_scan_background, region.id)
+            results.append({"region_id": region.id, "queued": True, "mode": "background"})
 
     return {
         "total": len(results),

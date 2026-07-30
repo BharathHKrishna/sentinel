@@ -63,16 +63,40 @@ export default function Dashboard() {
     acc[e.detected_type] = (acc[e.detected_type] ?? 0) + 1; return acc
   }, {})
 
+  const pollForNewEvent = (regionId: number, priorCount: number, attempt = 1) => {
+    setTimeout(async () => {
+      const events = await eventsApi.list({ region_id: regionId, limit: 50 }).catch(() => null)
+      if (events && events.length > priorCount) {
+        await load()
+        setScanSuccess(null)
+        return
+      }
+      if (attempt < 4) {
+        pollForNewEvent(regionId, priorCount, attempt + 1)
+      } else {
+        setScanSuccess(null)
+      }
+    }, 15_000)
+  }
+
   const handleScan = async (regionId: number) => {
     setScanningId(regionId)
     setScanError(null)
     setScanSuccess(null)
     try {
-      await adminApi.triggerScan(regionId)
-      setScanSuccess(`Scan started for "${regionMap[regionId]?.name}". Refresh in ~30s to see results.`)
-      setTimeout(() => { load(); setScanSuccess(null) }, 35_000)
+      const res = await adminApi.triggerScan(regionId)
+      if (res.result === 'no_change') {
+        setScanSuccess(`No change detected in "${regionMap[regionId]?.name}" — satellite imagery looks the same as 3 weeks ago.`)
+      } else if (res.event_id) {
+        setScanSuccess(`Change detected in "${regionMap[regionId]?.name}"! Type: ${res.detected_type} (${Math.round((res.confidence ?? 0) * 100)}% confidence). Loading...`)
+        await load()
+      } else {
+        setScanSuccess(`Scan queued for "${regionMap[regionId]?.name}". Results appear on the map shortly.`)
+        const priorCount = allEvents.filter((e) => e.region_id === regionId).length
+        pollForNewEvent(regionId, priorCount)
+      }
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : 'Scan failed — server may be waking up, try again in 30s.')
+      setScanError(err instanceof Error ? err.message : 'Scan failed — try again in 30s.')
     } finally {
       setScanningId(null)
     }

@@ -126,12 +126,24 @@ export const statsApi = {
   get: () => apiClient.get<Stats>('/stats/').then((r) => r.data),
 }
 
+export interface ScanResult {
+  region_id?: number
+  result?: string
+  event_id?: number
+  detected_type?: string
+  confidence?: number
+  description?: string
+  queued?: boolean
+  task_id?: string
+  mode?: string
+}
+
 // Admin
 export const adminApi = {
   triggerScan: (regionId: number) =>
-    apiClient.post<{ queued: boolean; task_id: string }>(`/admin/scan/${regionId}`).then((r) => r.data),
+    apiClient.post<ScanResult>(`/admin/scan/${regionId}`).then((r) => r.data),
   triggerScanAll: () =>
-    apiClient.post<{ queued: boolean; task_id: string }>('/admin/scan-all').then((r) => r.data),
+    apiClient.post<{ total: number; results: ScanResult[] }>('/admin/scan-all').then((r) => r.data),
 }
 
 // Event feedback

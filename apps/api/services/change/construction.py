@@ -11,8 +11,7 @@ Strategy:
 from typing import Tuple
 
 import numpy as np
-from skimage.feature import graycomatrix, graycoprops  # type: ignore
-from skimage.util import img_as_ubyte  # type: ignore
+from scipy.ndimage import uniform_filter
 
 from apps.api.services.change.generic import compute_ndbi
 
@@ -22,7 +21,13 @@ def _glcm_contrast_map(
     patch_size: int = 15,
 ) -> np.ndarray:
     """
-    Compute per-pixel GLCM contrast using a sliding window.
+    Approximate per-pixel GLCM contrast (distance=1, angle=0, symmetric) using
+    a vectorised local mean instead of a per-pixel skimage.graycomatrix call.
+
+    For that offset, GLCM "contrast" = sum_i,j (i-j)^2 * P(i,j) reduces exactly
+    to the local mean of squared differences between horizontally-adjacent
+    quantised pixel pairs — a per-pixel Python loop over graycomatrix was
+    ~13k calls per 128x128 image and dominated scan latency.
 
     Parameters
     ----------
@@ -34,23 +39,25 @@ def _glcm_contrast_map(
     contrast : 2-D float32 array, same spatial dims as `band`
     """
     h, w = band.shape
-    # Quantise to 64 grey levels for speed
-    grey = np.clip((band * 63).astype(np.uint8), 0, 63)
-    contrast = np.zeros((h, w), dtype=np.float32)
+    # Quantise to 64 grey levels (truncating, matching the old uint8 cast)
+    grey = np.clip((band * 63).astype(np.uint8), 0, 63).astype(np.float32)
     half = patch_size
 
-    for y in range(half, h - half):
-        for x in range(half, w - half):
-            patch = grey[y - half : y + half + 1, x - half : x + half + 1]
-            glcm = graycomatrix(
-                patch,
-                distances=[1],
-                angles=[0],
-                levels=64,
-                symmetric=True,
-                normed=True,
-            )
-            contrast[y, x] = graycoprops(glcm, "contrast")[0, 0]
+    # diff_sq[:, c] is the squared diff of the pixel pair (c, c+1); a patch
+    # centred on column x spans diff columns [x-half, x+half-1] (2*half of
+    # them), while rows stay centred at y over [y-half, y+half] (2*half+1).
+    diff_sq = (grey[:, 1:] - grey[:, :-1]) ** 2  # (h, w-1) horizontal pair diffs
+    local_mean = uniform_filter(diff_sq, size=(2 * half + 1, 2 * half), mode="nearest")
+
+    contrast = np.zeros((h, w), dtype=np.float32)
+    contrast[:, : w - 1] = local_mean
+
+    # Original loop only ever filled y/x in [half, h-half)/[half, w-half);
+    # keep boundary pixels at 0 to match that behaviour.
+    contrast[:half, :] = 0.0
+    contrast[h - half:, :] = 0.0
+    contrast[:, :half] = 0.0
+    contrast[:, w - half:] = 0.0
 
     return contrast
 
