@@ -44,6 +44,7 @@ app.conf.update(
     # background task kicks in immediately instead of the caller hanging
     # for ~20s across retried connection attempts.
     broker_connection_timeout=2,
+    broker_connection_max_retries=0,
     broker_transport_options={"socket_connect_timeout": 2, "socket_timeout": 2},
     task_publish_retry=False,
     task_routes={
