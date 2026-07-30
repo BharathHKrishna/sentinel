@@ -6,6 +6,7 @@ logic synchronously in the same process (local dev without Redis).
 """
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -16,6 +17,12 @@ from apps.api.models import Region
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Long-lived pool (never shut down) so a stuck apply_async() thread can be
+# abandoned via a timeout without blocking the caller — Celery/kombu's own
+# connection-retry tuning wasn't reliably bounding the delay when REDIS_URL
+# points at an unreachable broker.
+_celery_dispatch_pool = ThreadPoolExecutor(max_workers=4)
 
 
 def _run_scan_sync(region_id: int) -> Dict[str, Any]:
@@ -129,10 +136,19 @@ def _run_scan_sync(region_id: int) -> Dict[str, Any]:
         db.close()
 
 
-def _try_celery(task_fn, *args, queue: str = "scanning") -> Dict[str, Any]:
-    """Try to dispatch via Celery; return None if Redis is unavailable."""
+def _try_celery(task_fn, *args, queue: str = "scanning", timeout: float = 3.0) -> Dict[str, Any]:
+    """
+    Try to dispatch via Celery; return None if Redis is unavailable or the
+    dispatch attempt doesn't complete within `timeout` seconds. Runs
+    apply_async() on a worker thread so a stuck connection (e.g. Celery's
+    internal retry/backoff on an unreachable broker) can be abandoned
+    without blocking the caller.
+    """
+    future = _celery_dispatch_pool.submit(
+        lambda: task_fn.apply_async(args=list(args), queue=queue)
+    )
     try:
-        task = task_fn.apply_async(args=list(args), queue=queue)
+        task = future.result(timeout=timeout)
         return {"queued": True, "task_id": task.id, "mode": "celery"}
     except Exception:
         return None
