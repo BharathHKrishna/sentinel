@@ -78,4 +78,27 @@ async def scan_test() -> dict:
         results["explainer_import"] = "ok"
     except Exception as e:
         results["explainer_import"] = str(e)
+
+    # Diagnose Redis reachability directly (bypassing Celery's retry/publish
+    # wrapping) since apply_async() was observed hanging ~20s in production.
+    redis_url = os.environ.get("REDIS_URL", "")
+    if redis_url:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(redis_url)
+        results["redis_target"] = f"{parsed.hostname}:{parsed.port}"
+        import time
+        t0 = time.monotonic()
+        try:
+            import redis as redis_lib
+            client = redis_lib.Redis.from_url(
+                redis_url, socket_connect_timeout=3, socket_timeout=3,
+            )
+            client.ping()
+            results["redis_ping"] = f"ok ({time.monotonic() - t0:.2f}s)"
+        except Exception as e:
+            results["redis_ping"] = f"{type(e).__name__}: {e} ({time.monotonic() - t0:.2f}s)"
+    else:
+        results["redis_target"] = None
+        results["redis_ping"] = "REDIS_URL not set"
+
     return results
