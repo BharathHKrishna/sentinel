@@ -20,16 +20,21 @@ apiClient.interceptors.request.use((config) => {
 })
 
 // Response interceptor — unwrap error messages
+function extractErrorMessage(error: any): string {
+  const detail = error.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    // FastAPI/Pydantic validation errors: [{ loc, msg, type }, ...]
+    return detail
+      .map((d) => (d && typeof d === 'object' ? `${(d.loc ?? []).join('.')}: ${d.msg ?? JSON.stringify(d)}` : String(d)))
+      .join('; ')
+  }
+  return error.response?.data?.message ?? error.message ?? 'An unexpected error occurred'
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    const message =
-      error.response?.data?.detail ??
-      error.response?.data?.message ??
-      error.message ??
-      'An unexpected error occurred'
-    return Promise.reject(new Error(message))
-  }
+  (error) => Promise.reject(new Error(extractErrorMessage(error)))
 )
 
 export default apiClient
@@ -73,8 +78,7 @@ export interface AlertSubscription {
 
 export interface RegionCreatePayload {
   name: string
-  lat: number
-  lon: number
+  geom: { type: 'Polygon'; coordinates: number[][][] }
   detection_types: string[]
   cadence: number
   owner_email: string | null

@@ -91,10 +91,17 @@ export default function RegionEditor() {
 
     try {
       setSubmitting(true)
+      const lonD = lonDelta(center.lat)
+      const west = center.lon - lonD
+      const east = center.lon + lonD
+      const south = center.lat - LAT_DELTA
+      const north = center.lat + LAT_DELTA
       const region = await regionsApi.create({
         name,
-        lat: center.lat,
-        lon: center.lon,
+        geom: {
+          type: 'Polygon',
+          coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]],
+        },
         detection_types: detectionTypes,
         cadence,
         owner_email: ownerEmail || null,
