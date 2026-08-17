@@ -2,7 +2,7 @@
 EventExplainer
 
 Generates a concise, human-readable description of a detected satellite
-anomaly using the Groq API (Llama 3.3-70B).
+anomaly using the Groq API (openai/gpt-oss-120b).
 """
 import logging
 import os
@@ -13,7 +13,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile was deprecated by Groq on 2026-08-16; this is
+# Groq's own recommended migration target for that model.
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 class EventExplainer:
@@ -66,7 +68,12 @@ class EventExplainer:
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.3,
-                    "max_tokens": 200,
+                    # gpt-oss-120b is a reasoning model — it spends tokens on
+                    # hidden reasoning before the visible answer, so the old
+                    # 200-token budget (fine for the non-reasoning Llama
+                    # model this replaced) cut responses off mid-sentence.
+                    # Verified live: 600 completes cleanly with headroom.
+                    "max_tokens": 600,
                 },
                 timeout=30,
             )
